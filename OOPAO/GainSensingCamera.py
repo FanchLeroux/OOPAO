@@ -77,7 +77,7 @@ class GainSensingCamera:
         self.n_jobs = n_jobs
         self.calibration_ready = False
         self.detector_properties = None
-        self.tag = 'GSC'
+        self.tag = "GSC"
 
     def calibration(self, frame: np.array) -> None:
         """
@@ -89,16 +89,16 @@ class GainSensingCamera:
             frame from the focal plane camera.
         """
         frame = to_numpy(frame)
-        frame = frame/frame.sum()
-        print('\nGain Scheduling camera calibration:')
+        frame = frame / frame.sum()
+        print("\nGain Scheduling camera calibration:")
         self.basis_product = split_basis_product(
-            padder(self.basis, self.mask.shape[0]), self.n_jobs)
+            padder(self.basis, self.mask.shape[1]), self.n_jobs
+        )
         self.IR_calib = impulse_response(self.mask, frame)
-        self.sensi_calib = sensitivity(
-            self.IR_calib, self.IR_calib, self.basis_product)
+        self.sensi_calib = sensitivity(self.IR_calib, self.IR_calib, self.basis_product)
         self.calibration_ready = True
         self.og = np.ones(self.n_modes)
-        
+
     def reset_calibration(self) -> None:
         """
         Reset the calibration and set vector of optical gains to 1
@@ -117,26 +117,29 @@ class GainSensingCamera:
 
         """
         if self.calibration_ready is False:
-            raise OopaoError('Optical gains must be initialized first!')
+            raise OopaoError("Optical gains must be initialized first!")
         else:
             frame = to_numpy(frame)
-            frame = frame/frame.sum()
+            frame = frame / frame.sum()
             self.IR_sky = impulse_response(self.mask, frame)
             self.og = optical_gains(
-                self.IR_sky, self.IR_calib, self.basis_product, self.sensi_calib)
+                self.IR_sky, self.IR_calib, self.basis_product, self.sensi_calib
+            )
 
     def __repr__(self) -> str:
         if self.detector_properties is None:
             prop = f'{"Calibrated":<16}|{str(self.calibration_ready):^7}\n'
             prop += f'{"Number of modes":<16}|{self.n_modes:^7}\n'
-            n_char = len(max(prop.split('\n'), key=len))
+            n_char = len(max(prop.split("\n"), key=len))
         else:
             prop = f'{"Calibrated":<25}|{str(self.calibration_ready):^9}\n'
             prop += f'{"Number of modes":<25}|{self.n_modes:^9}\n'
-            n_char = max(len(max(self.detector_properties.values(), key=len)),
-                         len(max(prop.split('\n'), key=len)))
+            n_char = max(
+                len(max(self.detector_properties.values(), key=len)),
+                len(max(prop.split("\n"), key=len)),
+            )
             for i in range(len(self.detector_properties.values())):
-                prop += list(self.detector_properties.values())[i] + '\n'
+                prop += list(self.detector_properties.values())[i] + "\n"
         title = f'{" GSC ":-^{n_char}}\n'
         end_line = f'{"":-^{n_char}}\n'
         table = title + prop + end_line
@@ -149,57 +152,102 @@ def padder(array: np.array, size_out: int) -> np.array:
         array_padded = np.pad(array, ((pad, pad), (pad, pad), (0, 0)))
     else:
         raise OopaoError(
-            f'Output size {size_out} should be higher than input size {array.shape[0]}')
+            f"Output size {size_out} should be higher than input size {array.shape[0]}"
+        )
     return array_padded
 
 
 def fft3(array: np.array) -> np.array:
-    return fftshift(fftn(fftshift(array, axes=(0, 1)), axes=(0, 1)), axes=(0, 1)) / array.shape[0]
+    return (
+        fftshift(fftn(fftshift(array, axes=(0, 1)), axes=(0, 1)), axes=(0, 1))
+        / array.shape[0]
+    )
 
 
 def ifft3(array: np.array) -> np.array:
-    return fftshift(ifftn(fftshift(array, axes=(0, 1)), axes=(0, 1)), axes=(0, 1)) * array.shape[0]
+    return (
+        fftshift(ifftn(fftshift(array, axes=(0, 1)), axes=(0, 1)), axes=(0, 1))
+        * array.shape[0]
+    )
 
 
 def split_basis_product(basis: np.array, n_jobs: int) -> np.array:
     n_chunks = int(np.ceil(basis.shape[-1] / n_jobs))
     splits = np.array_split(basis, n_chunks, axis=-1)
-    basis_product = np.zeros(basis.shape, dtype='complex128')
+    basis_product = np.zeros(basis.shape, dtype="complex128")
     start = 0
     for i, split in enumerate(splits):
-        progress_bar = '\033[1;31m\u2501\033[1;00m' * (int(25*i/n_chunks)) + \
-                       '\u2501' * (25 - int(25*i/n_chunks)-2) + \
-                       ' %3.1f%%' % ((i+1)/n_chunks*100)
+        progress_bar = (
+            "\033[1;31m\u2501\033[1;00m" * (int(25 * i / n_chunks))
+            + "\u2501" * (25 - int(25 * i / n_chunks) - 2)
+            + " %3.1f%%" % ((i + 1) / n_chunks * 100)
+        )
         print(progress_bar, end="\r", flush=True)
         end = start + split.shape[-1]
         # split = np.array_split(basis, n_chunks, axis=-1)[i]
         basis_product[:, :, start:end] = fft3(split) * ifft3(split)
         start = end
-    print('\n')
+    print("\n")
     return basis_product
 
 
 def convolution(array_1: np.array, array_2: np.array) -> np.array:
     fft_array_1 = fftshift(fft2(fftshift(array_1))) / array_1.shape[0]
     fft_array_2 = fftshift(fft2(fftshift(array_2))) / array_1.shape[0]
-    convo_array = fftshift(ifft2(fftshift(fft_array_1 * fft_array_2))
-                           ) * np.sqrt(array_1.shape[0]*array_1.shape[1])
+    convo_array = fftshift(ifft2(fftshift(fft_array_1 * fft_array_2))) * np.sqrt(
+        array_1.shape[0] * array_1.shape[1]
+    )
     return convo_array
 
 
-def impulse_response(mask: np.array, frame: np.array) -> np.array:
-    return 2 * np.imag(np.conj(fftshift(fft2(fftshift(mask)))/mask.shape[0]) * fftshift(fft2(fftshift(mask * frame)))/mask.shape[0])
+def impulse_response(
+    mask: np.ndarray,
+    frame: np.ndarray,
+) -> np.ndarray:
+    if mask.ndim == 2:
+        mask = mask[np.newaxis, ...]
+
+    impulse_responses = np.zeros(mask.shape, dtype=float)
+
+    for index, m in enumerate(mask):
+        impulse_responses[index] = 2 * np.imag(
+            np.conj(fftshift(fft2(fftshift(m))) / m.shape[0])
+            * fftshift(fft2(fftshift(m * frame)))
+            / m.shape[0]
+        )
+
+    return impulse_responses
 
 
-def sensitivity(IR_1: np.array, IR_2: np.array, basis_product: np.array) -> np.array:
+def sensitivity_single(
+    IR_1: np.array, IR_2: np.array, basis_product: np.array
+) -> np.array:
     fft_IR_1 = fftshift(fft2(fftshift(IR_1))).flatten() / IR_1.shape[0]
     ifft_IR_2 = fftshift(ifft2(fftshift(IR_2))).flatten() * IR_2.shape[0]
     S = (fft_IR_1 * ifft_IR_2) @ basis_product.reshape(
-        basis_product.shape[0]**2, basis_product.shape[-1])
+        basis_product.shape[0] ** 2, basis_product.shape[-1]
+    )
     return S
 
 
-def optical_gains(IR_sky: np.array, IR_calib: np.array, basis_product: np.array, sensi_calib: np.array) -> np.array:
+def sensitivity(
+    impulse_responses_1: np.array,
+    impulse_responses_2: np.array,
+    basis_product: np.array,
+) -> np.array:
+
+    sensitivity_total = np.zeros(basis_product.shape[-1], dtype=complex)
+
+    for IR_1, IR_2 in zip(impulse_responses_1, impulse_responses_2):
+        sensitivity = sensitivity_single(IR_1, IR_2, basis_product)
+        sensitivity_total += sensitivity**2
+
+    return sensitivity_total**0.5
+
+
+def optical_gains(
+    IR_sky: np.array, IR_calib: np.array, basis_product: np.array, sensi_calib: np.array
+) -> np.array:
     sensi_sky = sensitivity(IR_sky, IR_calib, basis_product)
     og = np.real(sensi_sky / sensi_calib)
     return og
